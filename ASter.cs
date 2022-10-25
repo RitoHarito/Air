@@ -47,39 +47,23 @@ public class ASter : MonoBehaviour
             {
                 if (i == 0)
                 {
-                    var up = startPoint + Vector2Int.up; AddNextGridList(up);
-                    var upright = startPoint + Vector2Int.up + Vector2Int.right; AddNextGridList(upright); 
-                    var right = startPoint + Vector2Int.right; AddNextGridList(right);
-                    var rightdown = startPoint + Vector2Int.down + Vector2Int.right; AddNextGridList(rightdown);
-                    var down = startPoint + Vector2Int.down; AddNextGridList(down);
-                    var downleft = startPoint + Vector2Int.down + Vector2Int.left; AddNextGridList(downleft);
-                    var left = startPoint + Vector2Int.left; AddNextGridList(left);
-                    var leftup = startPoint +   Vector2Int.left + Vector2Int.up; AddNextGridList(leftup);
-                    //Handles.Label(ConvertVector2Int(left) + Vector3.up, $"<color=#ff0000>{Cost(left)}</color>", gUIStyle);
+                    Check8Direction(startPoint);//Handles.Label(ConvertVector2Int(left) + Vector3.up, $"<color=#ff0000>{Cost(left)}</color>", gUIStyle);
                 }
                 else
                 {
-                    var up = nextGrid + Vector2Int.up; AddNextGridList(up);
-                    var upright = nextGrid + Vector2Int.up + Vector2Int.right; AddNextGridList(upright);
-                    var right = nextGrid + Vector2Int.right; AddNextGridList(right);
-                    var rightdown = nextGrid + Vector2Int.down + Vector2Int.right; AddNextGridList(rightdown);
-                    var down = nextGrid + Vector2Int.down; AddNextGridList(down);
-                    var downleft = nextGrid + Vector2Int.down + Vector2Int.left; AddNextGridList(downleft);
-                    var left = nextGrid + Vector2Int.left; AddNextGridList(left);
-                    var leftup = nextGrid + Vector2Int.left + Vector2Int.up; AddNextGridList(leftup);
+                    Check8Direction(nextGrid);
                 }
-                nextGrid = ChackNextThisGrid(NextGridList);
+                nextGrid = CheckNextThisGrid(NextGridList);
                 if (!ResultGridList.Exists(x => x == nextGrid))
                 {
                     ResultGridList.Add(nextGrid);
                 }
-
             }
-            for (int i = 0; i < NextGridList.Count; i++)
-            {
-                var dbg_str = NextGridList[i];
-                Handles.Label(ConvertVector2Int(NextGridList[i]) + Vector3.up, $"<color=#ff0000>{dbg_str}</color>", gUIStyle);
-            }
+            //for (int i = 0; i < NextGridList.Count; i++)
+            //{
+            //    var dbg_str = NextGridList[i];
+            //    Handles.Label(ConvertVector2Int(NextGridList[i]) + Vector3.up, $"<color=#ff0000>{dbg_str}</color>", gUIStyle);
+            //}
             for (int i = 0; i < ResultGridList.Count; i++)
             {
                 Gizmos.DrawSphere(ConvertVector2Int(ResultGridList[i]), gizmoSize);
@@ -96,38 +80,49 @@ public class ASter : MonoBehaviour
             }
         }
     }
-
-    private Vector2Int ChackNextThisGrid(List<Vector2Int> grids)
+    private void Check8Direction(Vector2Int thisGrid)
+    {
+        var up = thisGrid + Vector2Int.up;
+        var upright = thisGrid + Vector2Int.up + Vector2Int.right;
+        var right = thisGrid + Vector2Int.right;
+        var rightdown = thisGrid + Vector2Int.down + Vector2Int.right;
+        var down = thisGrid + Vector2Int.down;
+        var downleft = thisGrid + Vector2Int.down + Vector2Int.left;
+        var left = thisGrid + Vector2Int.left;
+        var leftup = thisGrid + Vector2Int.left + Vector2Int.up;
+        AddNextGridList(up);
+        AddNextGridList(upright);
+        AddNextGridList(right);
+        AddNextGridList(rightdown);
+        AddNextGridList(down);
+        AddNextGridList(downleft);
+        AddNextGridList(left);
+        AddNextGridList(leftup);
+    }
+    private Vector2Int CheckNextThisGrid(List<Vector2Int> grids)
     {
         var result = new Vector2Int();
         var costs_tuple = new List<(float cost, Vector2Int grid)>();
         var costs = new List<float>();
-        foreach (var grid in grids)
+        foreach (var thisGrid in grids)
         {
-            var cost = CalcCost(grid);
-            costs.Add(cost);
-            var cost_tuple = (cost, grid);
-            costs_tuple.Add(cost_tuple);
+            if (!ResultGridList.Exists(x => x == thisGrid))
+            {
+                var cost = CalcCost(thisGrid); costs.Add(cost);
+                var cost_tuple = (cost, thisGrid); costs_tuple.Add(cost_tuple);
+            }
         }
-        var costsArray = costs.ToArray();
-        var lowestCost = Mathf.Min(costsArray);
+        var lowestCost = Mathf.Min(costs.ToArray());
         result = costs_tuple.Find(x => x.cost == lowestCost).grid;
-        foreach (var grid in grids)
-        {
-            //SetCost(grid, -2);
-        }
         return result;
     }
     private void AddNextGridList(Vector2Int thisGrid)
     {
-        if (CheckGrid(thisGrid)) { NextGridList.Add(thisGrid); }
+        if (AllowGrid(thisGrid)) { NextGridList.Add(thisGrid); }
     }
     private float CalcCost(Vector2Int thisGrid)
     {
-        if (CheckGrid(thisGrid))
-        {
-            grid[thisGrid.x, thisGrid.y] =  CostF(thisGrid);
-        }
+        if (AllowGrid(thisGrid)) { grid[thisGrid.x, thisGrid.y] = CostF(thisGrid); }
         return grid[thisGrid.x, thisGrid.y];
     }
     private void SetCost(Vector2Int thisGrid, int set)
@@ -145,9 +140,9 @@ public class ASter : MonoBehaviour
     private int Cost(Vector2Int input)
     {
         var _xS = input.x - startPoint.x; var _yS = input.y - startPoint.y;
-        int fromStartDistance = _xS * _xS + _yS * _yS;//float fromStartDistance = Vector2Int.Distance(input, startPoint);
+        int fromStartDistance = _xS * _xS + _yS * _yS;
         var _xE = input.x - endPoint.x; var _yE = input.y - endPoint.y;
-        int toEndDistance = _xE * _xE + _yE * _yE;//float toEndDistance = Vector2Int.Distance(input, endPoint);
+        int toEndDistance = _xE * _xE + _yE * _yE;
         return fromStartDistance + toEndDistance;
     }
     private float CostF(Vector2Int input)
@@ -156,6 +151,9 @@ public class ASter : MonoBehaviour
         float toEndDistance = Vector2Int.Distance(input, endPoint);
         return fromStartDistance + toEndDistance;
     }
-    private bool CheckGrid(Vector2Int thisGrid) { return !IsWall(thisGrid) && !IsClose(thisGrid); }
+    private bool AllowGrid(Vector2Int thisGrid)
+    {
+        return !IsWall(thisGrid) && !IsClose(thisGrid);
+    }
     Vector3 ConvertVector2Int(Vector2Int input) { return new Vector3(input.x, 0, input.y); }
 }
