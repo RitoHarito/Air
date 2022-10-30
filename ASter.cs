@@ -7,87 +7,94 @@ using UnityEngine;
 public class ASter : MonoBehaviour
 {
     [SerializeField] private GUIStyle gUIStyle;
-    [Header("WorldSetting")]
-    public Vector2Int worldSize;
-    public Vector2Int origin;
     [Header("PointSetting")]
-    public Vector2Int startPoint;
-    public Vector2Int endPoint;
+    public Transform startPoint;
+    public Transform endPoint;
+    private Vector2Int startGrid;
+    private Vector2Int endGrid;
     [Header("Step")]
     [Range(1, 1000)] public int step;
     [Range(1, 1000)] public int step2;
     [Header("Gizmo")]
     [SerializeField] private float gizmoSize;
-    private float[,] grid;//0=normal -1=wall -2=close 
     private Grid nextGrid;
+    private Vector2Int nextPath;
     private List<Grid> openGridList = new List<Grid>();
     private List<Grid> resultGridList = new List<Grid>();
     private List<Vector2Int> pathGridList = new List<Vector2Int>();
     private Dictionary<Vector2Int, Vector2Int> pathGridDictionary = new Dictionary<Vector2Int, Vector2Int>();
-    public bool GO;
     [SerializeField] private float rayHeight;
     public bool finded;
+    public bool complete; 
+    [SerializeField] private bool viewPath;
+    SimpleControls inputActions;
+    public void Awake()
+    {
+        inputActions = new SimpleControls();
+        inputActions.Default.Fire.performed += ctx =>
+        {
+            Initialize();
+        };
+    }
+    private void Start()
+    {
+        Initialize();
+    }
+    public void OnEnable() { inputActions.Enable(); }
+    public void OnDisable() { inputActions.Disable(); }
+    private void Update()
+    {
+        if (!complete)
+        {
+            Search();
+            PathFind();
+        }
+    }
     private void OnDrawGizmos()
     {
-        if (GO)
+        if (viewPath)
         {
-            Gizmos.DrawSphere(V2IToV3(startPoint), gizmoSize);
-            Gizmos.DrawSphere(V2IToV3(endPoint), gizmoSize);
-            Initialize();
-            for (int i = 0; i < step; i++)
-            {
-                Search(i);
-                if (finded) { break; }
-            }
-            PathFind();
+            Gizmos.DrawSphere(startPoint.position, gizmoSize);
+            Gizmos.DrawSphere(endPoint.position, gizmoSize);
             for (int i = 0; i < pathGridList.Count; i++)
             {
-                Gizmos.DrawWireSphere(V2IToV3(pathGridList[i]), gizmoSize);
+                Gizmos.DrawSphere(V2IToV3(pathGridList[i]), gizmoSize);
             }
             for (int i = 0; i < resultGridList.Count; i++)
             {
-                var dbg_str = grid[resultGridList[i].position.x, resultGridList[i].position.y].ToString();
-                Handles.Label(V2IToV3(resultGridList[i].position) + Vector3.up, $"<color=#000000>{dbg_str}</color>", gUIStyle);
+                Gizmos.DrawWireSphere(V2IToV3(resultGridList[i].position), gizmoSize / 2);
             }
-
         }
     }
- 
     private void Initialize()
     {
-        grid = new float[worldSize.x, worldSize.y];
+        step = 0;
+        step2 = 0;
+        finded = false;
+        complete = false;
         nextGrid = new Grid();
+        nextPath = new Vector2Int();
         openGridList = new List<Grid>();
         resultGridList = new List<Grid>();
-        pathGridDictionary = new Dictionary<Vector2Int, Vector2Int>();
         pathGridList = new List<Vector2Int>();
-        for (int i = 0; i < worldSize.x; i++)
-        {
-            for (int ii = 0; ii < worldSize.y; ii++)
-            {
-                var thisGrid = new Vector3(origin.x + i, 0, origin.y + ii);
-                var thisWorldGrid = V3ToV2I(thisGrid);
-                if (CheckWall(thisGrid)) { SetGrid(thisWorldGrid, -1); }
-                else { SetGrid(thisWorldGrid, 0); }
-            }
-        }
+        pathGridDictionary = new Dictionary<Vector2Int, Vector2Int>();
+        startGrid = V3ToV2I(startPoint.position);
+        endGrid = V3ToV2I(endPoint.position);
     }
-    private void Search(int i)
+    private void Search()
     {
-        finded = nextGrid.position == endPoint;
+        if (finded) { return; }
+        finded = nextGrid.position == endGrid;
         var previousGrid = nextGrid.position;
-        if (i == 0) { nextGrid.position = startPoint; Check8Direction(nextGrid); }
+        if (step == 0) { nextGrid.position = startGrid; Check8Direction(nextGrid); }
         else { Check8Direction(nextGrid); }
-        nextGrid = CheckNextGrid(openGridList);
-        if (!resultGridList.Exists(x => x.position == nextGrid.position))
+        if (CheckNextGrid(openGridList, out nextGrid))
         {
-            resultGridList.Add(nextGrid);
+            if (!resultGridList.Exists(x => x.position == nextGrid.position)) { resultGridList.Add(nextGrid); }
+            else { nextGrid.parent = nextGrid.position; }
+            pathGridDictionary.Add(nextGrid.position, nextGrid.parent);
         }
-        else
-        {
-            nextGrid.parent = nextGrid.position;
-        }
-        pathGridDictionary.Add(nextGrid.position, nextGrid.parent);
+        step++;
     }
     private void Check8Direction(Grid thisGrid)
     {
@@ -102,15 +109,17 @@ public class ASter : MonoBehaviour
     }
     private void AddOpenGridList(Grid thisGrid)
     {
+        var cost = CheckWall(V2IToV3(thisGrid.position)) ? -1 : 0;
+        thisGrid.cost = cost;
         if (AllowGrid(thisGrid)) { openGridList.Add(thisGrid); }
     }
-    private Grid CheckNextGrid(List<Grid> grids)
+    private bool CheckNextGrid(List<Grid> grids, out Grid result)
     {
-        var result = new Grid();
         var gridList = new List<Grid>();
         var costList = new List<float>();
-        foreach (var thisGrid in grids)
+        for (int i = 0; i < grids.Count; i++)
         {
+            var thisGrid = grids[i];
             if (!resultGridList.Exists(x => x.position == thisGrid.position))
             {
                 var cost = CalcCost(thisGrid);
@@ -121,28 +130,26 @@ public class ASter : MonoBehaviour
         }
         var lowestCost = Mathf.Min(costList.ToArray());
         result = gridList.Find(x => x.cost == lowestCost);
-        return result;
+        return result != null;
     }
     private void PathFind()
     {
         if (!finded) { return; }
-        var nextPathGrid = new Vector2Int();
-        for (int i = 0; i < step2; i++)
+        if (step2 == 0) { nextPath = endGrid; }
+        else
         {
-            if (i == 0) { nextPathGrid = endPoint; }
-            else
+            if (pathGridDictionary.ContainsKey(nextPath))
             {
-                if (pathGridDictionary.ContainsKey(nextPathGrid))
-                {
-                    nextPathGrid = pathGridDictionary[nextPathGrid];
-                }
+                nextPath = pathGridDictionary[nextPath];
             }
-            pathGridList.Add(nextPathGrid);
         }
+        pathGridList.Add(nextPath);
+        step2++;
+        complete = nextPath == startGrid;
     }
-    private void SetGrid(Vector2Int thisGrid, int set)
+    private void SetCost(Grid thisGrid, int set)
     {
-        grid[thisGrid.x, thisGrid.y] = set;
+        thisGrid.cost = set;
     }
     private bool CheckWall(Vector3 thisWorldGrid)
     {
@@ -150,36 +157,35 @@ public class ASter : MonoBehaviour
         var rayEnd = thisWorldGrid + Vector3.down;
         return Physics.Linecast(rayStart, rayEnd);
     }
-    private bool IsWall(Vector2Int thisGrid)
+    private bool IsWall(Grid thisGrid)
     {
-        return grid[thisGrid.x, thisGrid.y] == -1;
+        return thisGrid.cost == -1;
     }
-    private bool IsClose(Vector2Int thisGrid)
+    private bool IsClose(Grid thisGrid)
     {
-        return grid[thisGrid.x, thisGrid.y] != -1 && grid[thisGrid.x, thisGrid.y] != 0;
+        return thisGrid.cost != -1 && thisGrid.cost != 0;
     }
     private bool AllowGrid(Grid thisGrid)
     {
-        return !IsWall(thisGrid.position) && !IsClose(thisGrid.position);
+        return !IsWall(thisGrid) && !IsClose(thisGrid);
     }
     private float CalcCost(Grid thisGrid)
     {
-        var pos = thisGrid.position;
-        if (AllowGrid(thisGrid)) { grid[pos.x, pos.y] = CostF(pos); }
-        return grid[pos.x, pos.y];
+        if (AllowGrid(thisGrid)) { thisGrid.cost = CostF(thisGrid.position); }
+        return thisGrid.cost;
     }
     private float CostF(Vector2Int input)
     {
-        float fromStartDistance = Vector2Int.Distance(input, startPoint);
-        float toEndDistance = Vector2Int.Distance(input, endPoint);
+        float fromStartDistance = Vector2Int.Distance(input, startGrid);
+        float toEndDistance = Vector2Int.Distance(input, endGrid);
         return fromStartDistance + toEndDistance;
     }
     private int Cost(Vector2Int input)
     {
-        var _xS = input.x - startPoint.x; var _yS = input.y - startPoint.y;
-        int fromStartDistance = _xS * _xS + _yS * _yS;
-        var _xE = input.x - endPoint.x; var _yE = input.y - endPoint.y;
-        int toEndDistance = _xE * _xE + _yE * _yE;
+        var _xS = input.x - startPoint.position.x; var _yS = input.y - startPoint.position.y;
+        int fromStartDistance = (int)(_xS * _xS + _yS * _yS);
+        var _xE = input.x - endPoint.position.x; var _yE = input.y - endPoint.position.y;
+        int toEndDistance = (int)(_xE * _xE + _yE * _yE);
         return fromStartDistance + toEndDistance;
     }
     private Vector3 V2IToV3(Vector2Int input) { return new Vector3(input.x, 0, input.y); }
@@ -188,7 +194,7 @@ public class ASter : MonoBehaviour
 [System.Serializable]
 public class Grid
 {
-    public float cost = 0;
+    public float cost;
     public Vector2Int position;
     public Vector2Int parent;
 }
