@@ -31,7 +31,8 @@ public class ASter : MonoBehaviour
     public bool complete;
     [SerializeField] private bool viewPath;
 
-    public float[,] localGridCost;
+    public bool[,] localGrid;
+    private Dictionary<Vector2Int, Vector2Int> localGridDictionary = new Dictionary<Vector2Int, Vector2Int>();
     private void Start()
     {
         Initialize();
@@ -46,34 +47,33 @@ public class ASter : MonoBehaviour
     }
     private void OnDrawGizmos()
     {
-        //for (int i = 0; i < worldSize.x; i++)
-        //{
-        //    for (int ii = 0; ii < worldSize.y; ii++)
-        //    {
-        //        var gridPos = new Vector2Int((-worldSize.x / 2) + i, (-worldSize.y / 2) + ii);
-        //        var dbg_str = costDictionary[gridPos].ToString("F1");
-        //        Handles.Label(V2IToV3(gridPos) + Vector3.up, $"<color=#000000>{dbg_str}</color>", gUIStyle);
-        //       // Gizmos.DrawSphere(V2IToV3(gridPos), gizmoSize);
-        //    }
-        //} 
         if (viewPath)
         {
+            var w = worldSize.x / 2;
+            var h = worldSize.y / 2;
+            var p0 = startPoint.position + new Vector3(w, 0, h);
+            var p1 = startPoint.position + new Vector3(w, 0, -h);
+            var p2 = startPoint.position + new Vector3(-w, 0, -h);
+            var p3 = startPoint.position + new Vector3(-w, 0, h);
+            Gizmos.DrawLine(p0, p1);
+            Gizmos.DrawLine(p1, p2);
+            Gizmos.DrawLine(p2, p3);
+            Gizmos.DrawLine(p3, p0);
             Gizmos.DrawSphere(startPoint.position, gizmoSize);
             Gizmos.DrawSphere(endPoint.position, gizmoSize);
             for (int i = 0; i < pathGridList.Count; i++)
             {
-                Gizmos.DrawSphere(V2IToV3(pathGridList[i]), gizmoSize);
+
+                Gizmos.color = Color.cyan;
+                Gizmos.DrawSphere(V2IToV3(pathGridList[i]), gizmoSize * 1.25f);
+                if (i != 0) { Gizmos.DrawLine(V2IToV3(pathGridList[i]), V2IToV3(pathGridList[i - 1])); }
             }
             for (int i = 0; i < resultGridList.Count; i++)
             {
                 Gizmos.color = Color.white;
                 Gizmos.DrawWireSphere(V2IToV3(resultGridList[i]), gizmoSize);
             }
-            for (int i = 0; i < openGridList.Count; i++)
-            {
-                Gizmos.color = Color.yellow;
-                Gizmos.DrawWireSphere(V2IToV3(openGridList[i].position), gizmoSize / 2);
-            }
+
         }
 
     }
@@ -94,8 +94,8 @@ public class ASter : MonoBehaviour
         endGrid = V3ToV2I(endPoint.position);
         nextGrid.position = startGrid;
         costDictionary = new Dictionary<Vector2Int, float>();
-
-        localGridCost = new float[worldSize.x, worldSize.y];
+        localGrid = new bool[worldSize.x, worldSize.y];
+        localGridDictionary = new Dictionary<Vector2Int, Vector2Int>();
         for (int i = 0; i < worldSize.x; i++)
         {
             for (int ii = 0; ii < worldSize.y; ii++)
@@ -103,7 +103,9 @@ public class ASter : MonoBehaviour
                 var gridPos = new Vector2Int((-worldSize.x / 2) + i, (-worldSize.y / 2) + ii);
                 var cost = CheckWall(V2IToV3(gridPos)) ? -1f : 0f;
                 if (cost == -1) { costDictionary.Add(gridPos, cost); }
-                //  localGridCost[i, ii] = CostF(gridPos);
+                var localPosition = new Vector2Int(i, ii);
+                localGridDictionary.Add(gridPos, localPosition);
+                localGrid[i, ii] = false;
             }
         }
     }
@@ -114,11 +116,13 @@ public class ASter : MonoBehaviour
         Check8Direction(nextGrid.position);
         if (CheckNextGrid(openGridList, out nextGrid))
         {
-            if (!resultGridList.Exists(x => x == nextGrid.position))
+            var localPosition = localGridDictionary[nextGrid.position];
+            if (localGrid[localPosition.x, localPosition.y] == false)
             {
                 resultGridList.Add(nextGrid.position);
+                localGrid[localPosition.x, localPosition.y] = true;
             }
-            else { nextGrid.parent = nextGrid.position; }
+            else { nextGrid.parent = nextGrid.position; localGrid[localPosition.x, localPosition.y] = true; }
             if (!pathGridDictionary.ContainsKey(nextGrid.position)) { pathGridDictionary.Add(nextGrid.position, nextGrid.parent); }
             openGridList.Remove(nextGrid);
             step++;
@@ -146,7 +150,8 @@ public class ASter : MonoBehaviour
         for (int i = 0; i < grids.Count; i++)
         {
             var thisGrid = grids[i];
-            if (resultGridList.Exists(x => x == thisGrid.position)) { continue; }
+            var localPosition = localGridDictionary[thisGrid.position];
+            if (localGrid[localPosition.x, localPosition.y] == true) { continue; }
             gridList.Add(thisGrid);
             costList.Add(thisGrid.cost);
         }
