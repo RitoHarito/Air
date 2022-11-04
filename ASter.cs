@@ -1,25 +1,26 @@
 ﻿using System;
-using System.Collections;
 using System.Collections.Generic;
-using System.Linq;
+using System.Threading;
 using UnityEditor;
 using UnityEngine;
-
 public class ASter : MonoBehaviour
 {
     [SerializeField] private GUIStyle gUIStyle;
-    public Vector2Int worldSize;
-    [Range(-100, 1000)] public int worldSizeRange;
+    [Range(1, 500)] public int worldSizeRange;
     [Header("PointSetting")]
     public Transform startPoint;
     public Transform endPoint;
     private Vector2Int startGrid;
     private Vector2Int endGrid;
     [Header("Step")]
-    public int step;
-    public int step2;
+    public int searchStep;
+    public int pathFindStep;
+    public int maxStep = 10000;
     [Header("Gizmo")]
     [SerializeField] private float gizmoSize;
+    [SerializeField] private bool viewGizmo;
+    [SerializeField] private bool viewLinePath;
+    [SerializeField] private bool viewHasCode;
     private Grid nextGrid;
     private Vector2Int nextPath;
     private List<Grid> openGridList = new List<Grid>();
@@ -27,30 +28,72 @@ public class ASter : MonoBehaviour
     private List<Vector2Int> pathGridList = new List<Vector2Int>();
     private Dictionary<Vector2Int, Vector2Int> pathGridDictionary = new Dictionary<Vector2Int, Vector2Int>();
     private Dictionary<Vector2Int, float> costDictionary = new Dictionary<Vector2Int, float>();
-    public bool finded;
-    public bool complete;
-    [SerializeField] private bool viewPath;
-
-    public bool[,] localGrid;
-    private Dictionary<Vector2Int, Vector2Int> localGridDictionary = new Dictionary<Vector2Int, Vector2Int>();
-    private void Start()
+    [SerializeField] private bool finded;
+    [SerializeField] private bool complete;
+    private bool[,] localGrid;
+    private bool initialized;
+    private Dictionary<int, Vector2Int> localGridDictionary = new Dictionary<int, Vector2Int>();
+    private SimpleControls inputActions;
+    private LineRenderer lineRenderer;
+    private void Awake()
+    {
+        inputActions = new SimpleControls();
+        inputActions.Enable();
+        inputActions.Default.Fire.performed += ctx =>
+        {
+            StartASter();
+        };
+    }
+    public void StartASter()
     {
         Initialize();
+        var context = SynchronizationContext.Current;
+        ThreadPool.QueueUserWorkItem(_ =>
+        {
+            if (initialized)
+            {
+                for (int i = 0; i < maxStep; i++)
+                {
+                    if (complete) { break; }
+                    else
+                    {
+                        if (!finded) { Search(); }
+                        else { PathFind(); }
+                    }
+                }
+            }
+            context.Post(__ =>
+            {
+                OnComplete();
+                RenderPath();
+            }, null);
+        });
     }
     private void Update()
     {
-        if (!complete)
-        {
-            Search();
-            PathFind();
-        }
+        var leftStick = inputActions.Default.LeftStick.ReadValue<Vector2>();
+        startPoint.position += new Vector3(leftStick.x, 0, leftStick.y) * 0.1f;
+        FPSCounter();
     }
     private void OnDrawGizmos()
     {
-        if (viewPath)
+        if (viewHasCode)
         {
-            var w = worldSize.x / 2;
-            var h = worldSize.y / 2;
+            for (int i = 0; i < worldSizeRange; i++)
+            {
+                for (int ii = 0; ii < worldSizeRange; ii++)
+                {
+                    var worldSizeOrigin = -worldSizeRange / 2;
+                    var gridPos = new Vector2Int(worldSizeOrigin + i, worldSizeOrigin + ii);
+                    var dbg_str = GetHashCode(gridPos).ToString();
+                    Handles.Label(V2IToV3(gridPos) + Vector3.up, dbg_str, gUIStyle);
+                }
+            }
+        }
+        if (viewGizmo)
+        {
+            var w = worldSizeRange / 2;
+            var h = worldSizeRange / 2;
             var p0 = startPoint.position + new Vector3(w, 0, h);
             var p1 = startPoint.position + new Vector3(w, 0, -h);
             var p2 = startPoint.position + new Vector3(-w, 0, -h);
@@ -63,7 +106,6 @@ public class ASter : MonoBehaviour
             Gizmos.DrawSphere(endPoint.position, gizmoSize);
             for (int i = 0; i < pathGridList.Count; i++)
             {
-
                 Gizmos.color = Color.cyan;
                 Gizmos.DrawSphere(V2IToV3(pathGridList[i]), gizmoSize * 1.25f);
                 if (i != 0) { Gizmos.DrawLine(V2IToV3(pathGridList[i]), V2IToV3(pathGridList[i - 1])); }
@@ -73,15 +115,12 @@ public class ASter : MonoBehaviour
                 Gizmos.color = Color.white;
                 Gizmos.DrawWireSphere(V2IToV3(resultGridList[i]), gizmoSize);
             }
-
         }
-
     }
-
     private void Initialize()
     {
-        step = 0;
-        step2 = 0;
+        searchStep = 0;
+        pathFindStep = 0;
         finded = false;
         complete = false;
         nextGrid = new Grid();
@@ -94,29 +133,34 @@ public class ASter : MonoBehaviour
         endGrid = V3ToV2I(endPoint.position);
         nextGrid.position = startGrid;
         costDictionary = new Dictionary<Vector2Int, float>();
-        localGrid = new bool[worldSize.x, worldSize.y];
-        localGridDictionary = new Dictionary<Vector2Int, Vector2Int>();
-        for (int i = 0; i < worldSize.x; i++)
+        localGrid = new bool[worldSizeRange, worldSizeRange];
+        localGridDictionary = new Dictionary<int, Vector2Int>();
+        for (int i = 0; i < worldSizeRange; i++)
         {
-            for (int ii = 0; ii < worldSize.y; ii++)
+            for (int ii = 0; ii < worldSizeRange; ii++)
             {
-                var gridPos = new Vector2Int((-worldSize.x / 2) + i, (-worldSize.y / 2) + ii);
+                var worldSizeOrigin = (-worldSizeRange / 2);
+                var gridPos = new Vector2Int(worldSizeOrigin + i, worldSizeOrigin + ii);
                 var cost = CheckWall(V2IToV3(gridPos)) ? -1f : 0f;
                 if (cost == -1) { costDictionary.Add(gridPos, cost); }
                 var localPosition = new Vector2Int(i, ii);
-                localGridDictionary.Add(gridPos, localPosition);
+                var hashCode = GetHashCode(gridPos);
+                localGridDictionary.Add(hashCode, localPosition);
                 localGrid[i, ii] = false;
             }
         }
+        initialized = true;
     }
     private void Search()
     {
+        if (complete) { return; }
         if (finded) { return; }
         finded = nextGrid.position == endGrid;
         Check8Direction(nextGrid.position);
         if (CheckNextGrid(openGridList, out nextGrid))
         {
-            var localPosition = localGridDictionary[nextGrid.position];
+            var hashCode = GetHashCode(nextGrid.position);
+            var localPosition = localGridDictionary[hashCode];
             if (localGrid[localPosition.x, localPosition.y] == false)
             {
                 resultGridList.Add(nextGrid.position);
@@ -125,7 +169,7 @@ public class ASter : MonoBehaviour
             else { nextGrid.parent = nextGrid.position; localGrid[localPosition.x, localPosition.y] = true; }
             if (!pathGridDictionary.ContainsKey(nextGrid.position)) { pathGridDictionary.Add(nextGrid.position, nextGrid.parent); }
             openGridList.Remove(nextGrid);
-            step++;
+            searchStep++;
         }
     }
     private void Check8Direction(Vector2Int position)
@@ -150,7 +194,8 @@ public class ASter : MonoBehaviour
         for (int i = 0; i < grids.Count; i++)
         {
             var thisGrid = grids[i];
-            var localPosition = localGridDictionary[thisGrid.position];
+            var hashCode = GetHashCode(thisGrid.position);
+            var localPosition = localGridDictionary[hashCode];
             if (localGrid[localPosition.x, localPosition.y] == true) { continue; }
             gridList.Add(thisGrid);
             costList.Add(thisGrid.cost);
@@ -161,8 +206,7 @@ public class ASter : MonoBehaviour
     }
     private void PathFind()
     {
-        if (!finded) { return; }
-        if (step2 == 0) { nextPath = endGrid; }
+        if (pathFindStep == 0) { nextPath = endGrid; }
         else
         {
             if (pathGridDictionary.ContainsKey(nextPath))
@@ -171,8 +215,33 @@ public class ASter : MonoBehaviour
             }
         }
         pathGridList.Add(nextPath);
-        step2++;
+        pathFindStep++;
         complete = nextPath == startGrid;
+    }
+    private void OnComplete()
+    {
+        openGridList.Clear();
+        resultGridList.Clear();
+        costDictionary.Clear();
+        pathGridDictionary.Clear();
+        localGrid = new bool[0, 0];
+        localGridDictionary.Clear();
+        pathGridList.Reverse();
+        initialized = false;
+    }
+    private void RenderPath()
+    {
+        if (TryGetComponent(out lineRenderer))
+        {
+            var pathGridArray = new Vector3[pathGridList.Count];
+            for (int i = 0; i < pathGridList.Count; i++)
+            {
+                pathGridArray[i] = V2IToV3(pathGridList[i]);
+
+            }
+            lineRenderer.positionCount = pathGridArray.Length;
+            lineRenderer.SetPositions(pathGridArray);
+        }
     }
     private bool CheckWall(Vector3 thisWorldGrid)
     {
@@ -208,8 +277,29 @@ public class ASter : MonoBehaviour
         var _xE = (input - endGrid).magnitude;
         return (_xS * _xE);
     }
+
+    public int GetHashCode(Vector2Int input)
+    {
+        return input.x + input.y * worldSizeRange;
+    }
     private Vector3 V2IToV3(Vector2Int input) { return new Vector3(input.x, 0, input.y); }
     private Vector2Int V3ToV2I(Vector3 input) { return new Vector2Int((int)input.x, (int)input.z); }
+    int fps_frameCount;
+    float fps_prevTime;
+    string fps_CounterStr;
+    private void FPSCounter()
+    {
+        ++fps_frameCount;
+        float time = Time.realtimeSinceStartup - fps_prevTime;
+        if (time >= 0.5f)
+        {
+            var fpsStr = (fps_frameCount / time).ToString("F2");
+            fps_CounterStr = string.Format("{0}fps", fpsStr);
+            fps_frameCount = 0;
+            fps_prevTime = Time.realtimeSinceStartup;
+        }
+    }
+    private void OnGUI() { GUI.Label(new Rect(0, 0, 500, 500), fps_CounterStr, gUIStyle); }
 }
 [System.Serializable]
 public class Grid
